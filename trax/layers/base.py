@@ -17,6 +17,7 @@
 """Base layer class."""
 
 import copy
+import gzip
 import inspect
 import pickle
 import random
@@ -273,7 +274,7 @@ class Layer:
       else:
         self._clear_init_cache()
 
-      return (self._weights, self.state)
+      return (self.weights, self.state)
 
     except Exception:
       # Skipping 3 lines as it's always the uninteresting internal call.
@@ -296,10 +297,16 @@ class Layer:
           initialize both weights and state.
     """
     with tf.io.gfile.GFile(file_name, 'rb') as f:
-      dictionary = pickle.load(f)
-    self.weights = dictionary['weights']
+      with gzip.GzipFile(fileobj=f, compresslevel=2) as gzipf:
+        dictionary = pickle.load(gzipf)
+    input_signature = dictionary['input_signature']
+    weights_and_state_sig = self.weights_and_state_signature(input_signature)
+    weights, state = unflatten_weights_and_state(
+        dictionary['flat_weights'], dictionary['flat_state'],
+        weights_and_state_sig)
+    self.weights = weights
     if not weights_only:
-      self.state = dictionary['state']
+      self.state = state
 
   # End of public callable methods.
   # Methods and properties below are reserved for internal use.
@@ -345,6 +352,11 @@ class Layer:
   @state.setter
   def state(self, state):
     self._state = state
+
+  def weights_and_state_signature(self, input_signature):
+    """Return a pair containing the signatures of weights and state."""
+    abstract_init = math.abstract_eval(self.init)
+    return abstract_init(input_signature)
 
   @property
   def rng(self):
@@ -623,6 +635,28 @@ class LayerError(Exception):
                                                         self._caller['lineno'])
     shapes_str = '  layer input shapes: %s\n\n' % str(self._input_signature)
     return prefix + caller + shapes_str + self._traceback
+
+
+def flatten_weights_and_state(weights, state):
+  """Flatten weights and state into lists, excluding empty and cached ones."""
+  flat_weights = [w for w in math.tree_flatten(weights)
+                  if not (w is EMPTY_WEIGHTS or w is GET_WEIGHTS_FROM_CACHE)]
+  flat_state = [s for s in math.tree_flatten(state)
+                if not (s is EMPTY_STATE or s is GET_STATE_FROM_CACHE)]
+  return flat_weights, flat_state
+
+
+def unflatten_weights_and_state(flat_weights, flat_state,
+                                weights_and_state_signature):
+  """Un-flatten weights and state given their signatures."""
+  weights_tree, state_tree = weights_and_state_signature
+  weights_to_copy = [EMPTY_WEIGHTS, GET_WEIGHTS_FROM_CACHE]
+  weights, _ = math.tree_unflatten(flat_weights, weights_tree,
+                                   copy_from_tree=weights_to_copy)
+  states_to_copy = [EMPTY_STATE, GET_STATE_FROM_CACHE]
+  state, _ = math.tree_unflatten(flat_state, state_tree,
+                                 copy_from_tree=states_to_copy)
+  return weights, state
 
 
 def to_list(outputs):

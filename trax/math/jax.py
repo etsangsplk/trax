@@ -298,29 +298,32 @@ def tree_leaves(tree, ignore_nones=True):
   return [flat for flat in flattened if (not ignore_nones) or flat is not None]
 
 
-def tree_unflatten(flat, tree):
+def tree_unflatten(flat, tree, copy_from_tree=None):
   """Unflatten a list into a tree given the tree shape as second argument.
 
   Args:
     flat: a flat list of elements to be assembled into a tree.
     tree: a tree with the structure we want to have in the new tree.
+    copy_from_tree: optional list of elements that we just copy from tree.
 
   Returns:
     A pair (new_tree, rest_of_flat) where the new tree that has the structure
     of tree but with leaves from flat, and the remaining elements of flat if
     more were provided than the number of leaves of tree (useful for recursion).
   """
+  if copy_from_tree is not None and tree in copy_from_tree:
+    return tree, flat
   if isinstance(tree, (list, tuple)):
     new_tree, rest = [], flat
     for t in tree:
-      new_t, rest = tree_unflatten(rest, t)
+      new_t, rest = tree_unflatten(rest, t, copy_from_tree=copy_from_tree)
       new_tree.append(new_t)
     new_tree = tuple(new_tree) if isinstance(tree, tuple) else new_tree
     return new_tree, rest
   if isinstance(tree, dict):
     new_tree, rest = {}, flat
     for k in tree:
-      new_v, rest = tree_unflatten(rest, tree[k])
+      new_v, rest = tree_unflatten(rest, tree[k], copy_from_tree=copy_from_tree)
       new_tree[k] = new_v
     return new_tree, rest
   return flat[0], flat[1:]
